@@ -6,7 +6,7 @@ import { sequelize, DataTypes, Op } from './base.js'
  * @property {string} appid appid
  * @property {string} name 游戏名称
  * @property {string} community 社区icon
- * @property {string} header 完整封面 URL（旧缓存可能为相对路径）
+ * @property {string} header 封面资源路径或已验证的完整 URL
  */
 
 export const table = sequelize.define('game', {

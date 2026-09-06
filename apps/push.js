@@ -278,7 +278,7 @@ const rule = {
             name: i.gameextrainfo,
             detail: nickname,
             desc: i.personaname,
-            image: await utils.steam.getHeaderImgUrlByAppid(i.gameid)
+            appid: i.gameid
           })
         } else {
           notPlaying.push({

@@ -18,11 +18,11 @@ const rule = {
       if (players === false) {
         return '查询失败，可能没有这个游戏?'
       }
-      const icon = await utils.steam.getHeaderImgUrlByAppid(appid)
-      const iconBuffer = icon ? await utils.getImgUrlBuffer(icon) : null
+      const icon = await utils.steam.getHeaderImageByAppid(appid)
+      const iconBuffer = icon
       const msg = []
       if (iconBuffer) {
-        msg.push(segment.image(iconBuffer))
+        msg.push(segment.image(utils.steam.headerImageFile(iconBuffer)))
       }
       msg.push(`当前在线人数: ${players}`)
       return msg

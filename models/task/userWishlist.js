@@ -38,12 +38,12 @@ export async function callback () {
       if (!addItems.length) {
         continue
       }
-      const infoMap = await api.IStoreBrowseService.GetItems(addItems.map(i => i.appid)).catch(() => ({}))
+      const infoMap = await utils.steam.getGameSchineseInfo(addItems.map(i => i.appid))
       const games = addItems.map(i => {
         const info = infoMap[i.appid]
         return {
           ...i,
-          name: info.name,
+          name: info?.name || i.appid,
           desc: moment.unix(i.date_added).format('YYYY-MM-DD HH:mm:ss')
         }
       })
@@ -51,9 +51,9 @@ export async function callback () {
         const username = await utils.bot.getUserName(g.botId, g.userId, g.groupId)
         if (Config.push.pushMode == 1) {
           for (const i of games) {
-            const image = i.image || await utils.steam.getHeaderImgUrlByAppid(i.appid)
+            const image = i.image || await utils.steam.getHeaderImageByAppid(i.appid, infoMap[i.appid] || null)
             const msg = [
-              ...(image ? [segment.image(image)] : []),
+              ...(image ? [segment.image(utils.steam.headerImageFile(image))] : []),
               `[Steam] ${username}的愿望单新增: ${i.name}`
             ]
             await utils.bot.sendGroupMsg(g.botId, g.groupId, msg)

@@ -1,6 +1,9 @@
 import _ from 'lodash'
 import moment from 'moment'
 import { api, db } from '#models'
+import axios from 'axios'
+import { HttpProxyAgent } from 'http-proxy-agent'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 import { Config } from '#components'
 import { randomBytes } from 'crypto'
 
@@ -35,15 +38,19 @@ export function getFriendCode (steamId) {
 }
 
 /**
- * 从游戏资料缓存获取完整封面 URL；不可用时返回空字符串。
+ * 优先使用缓存的完整地址，否则沿用旧 CDN 资源路径。
+ * 此函数不调用 appdetails；发送/渲染图片请使用 getHeaderImageByAppid。
  * @param {string|number} appid
  * @returns {Promise<string>}
  */
 export async function getHeaderImgUrlByAppid (appid) {
-  if (!appid) return ''
+  if (!isAppid(appid)) return ''
   const info = await getGameSchineseInfo([appid])
-  const header = info[String(appid)]?.header
-  return isHeaderUrl(header) ? header : ''
+  return headerUrl(appid, info[String(appid)]?.header)
+}
+
+function isAppid (appid) {
+  return !!appid && /^\d{1,10}$/.test(String(appid))
 }
 
 function isHeaderUrl (header) {
@@ -55,8 +62,101 @@ function isHeaderUrl (header) {
   }
 }
 
-// 合并同一 App 的并行刷新；持久缓存仍使用 game 表和 3 天有效期。
-const gameInfoRequests = new Map()
+function headerUrl (appid, header) {
+  if (isHeaderUrl(header)) return header
+  const file = typeof header === 'string' && header && header !== 'false' && header !== '0' ? header : 'header.jpg'
+  return 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/' + appid + '/' + file
+}
+
+/** 将渲染用的 data URL 转为消息适配器通用的 Buffer。 */
+export function headerImageFile (source) {
+  return typeof source === 'string' && source.startsWith('data:image/')
+    ? Buffer.from(source.slice(source.indexOf(',') + 1), 'base64')
+    : source
+}
+
+const headerRequests = new Map()
+const headerFailures = new Map()
+const imageQueue = []
+let activeImages = 0
+
+async function withImageSlot (fn) {
+  if (activeImages >= 3) await new Promise(resolve => imageQueue.push(resolve))
+  else activeImages++
+  try {
+    return await fn()
+  } finally {
+    const next = imageQueue.shift()
+    if (next) next()
+    else activeImages--
+  }
+}
+
+// 下载一次并复用数据，避免渲染器/适配器再次下载同一张封面。
+async function downloadHeader (url) {
+  if (!isHeaderUrl(url)) return ''
+  try {
+    const response = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: (Number(Config.steam.timeout) || 5) * 1000,
+      httpAgent: Config.steam.proxy ? new HttpProxyAgent(Config.steam.proxy) : undefined,
+      httpsAgent: Config.steam.proxy ? new HttpsProxyAgent(Config.steam.proxy) : undefined
+    })
+    const buffer = Buffer.from(response.data)
+    // 某些代理会以 HTTP 200 返回 HTML 错误页，不能只判断状态码。
+    let mime = ''
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) mime = 'image/jpeg'
+    else if (buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) mime = 'image/png'
+    else if (/^GIF8[79]a$/.test(buffer.toString('ascii', 0, 6))) mime = 'image/gif'
+    else if (buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') mime = 'image/webp'
+    return mime ? 'data:' + mime + ';base64,' + buffer.toString('base64') : ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 获取可直接用于渲染/发送的封面数据。旧地址下载失败才查询 appdetails。
+ * @param {string|number} appid
+ * @param {import('models/db/game').GameColumns|null} cached 批量预取结果；null 表示没有记录
+ * @returns {Promise<string>} 图片 data URL，失败时为空
+ */
+export async function getHeaderImageByAppid (appid, cached) {
+  if (!isAppid(appid)) return ''
+  appid = String(appid)
+  if ((headerFailures.get(appid) || 0) > Date.now()) return ''
+  headerFailures.delete(appid)
+  if (headerRequests.has(appid)) return headerRequests.get(appid)
+  const pending = withImageSlot(async () => {
+    const info = cached === undefined ? (await getGameSchineseInfo([appid]))[appid] : cached
+    const url = headerUrl(appid, info?.header)
+    const image = await downloadHeader(url)
+    if (image) return image
+    const details = await api.store.appdetails(appid)
+    const actualUrl = details.header_image
+    const actualImage = actualUrl !== url ? await downloadHeader(actualUrl) : ''
+    if (!actualImage) return ''
+    const game = { appid, name: details.name || info?.name || appid, header: actualUrl }
+    // 图片已成功下载，数据库写入失败也不丢弃本次结果。
+    try {
+      if (info) await db.game.set(appid, game)
+      else await db.game.add([game])
+    } catch { /* ignore */ }
+    return actualImage
+  }).catch(() => '').then(image => {
+    if (!image) {
+      const until = Date.now() + 60 * 1000
+      headerFailures.set(appid, until)
+      const timer = setTimeout(() => {
+        if (headerFailures.get(appid) === until) headerFailures.delete(appid)
+      }, 60 * 1000)
+      timer.unref?.()
+    }
+    return image
+  }).finally(() => headerRequests.delete(appid))
+  headerRequests.set(appid, pending)
+  return pending
+}
 
 /**
  * 获取静态资源url
@@ -350,45 +450,42 @@ export function getStateColor (state) {
 }
 
 /**
- * 获取游戏名称和完整封面 URL，SQLite 缓存 3 天
+ * 批量获取游戏名称和封面资源路径，SQLite 缓存 3 天
  * @param {string[]} appids
  * @returns {Promise<{[appid: string]: import('models/db/game').GameColumns}>}
  */
 export async function getGameSchineseInfo (appids) {
-  appids = _.uniq(appids.filter(Boolean).map(String).filter(id => /^\d{1,10}$/.test(id)))
+  appids = _.uniq(appids.filter(isAppid).map(String))
   if (!appids.length) return {}
   let appInfo = {}
   try {
     appInfo = await db.game.get(appids)
     const now = moment().unix()
-    for (const appid of appids) {
+    const refreshIds = appids.filter(appid => {
       const cached = appInfo[appid]
       const updatedAt = cached && moment(cached.updatedAt).unix()
-      const expired = !cached || !Number.isFinite(updatedAt) || (now - updatedAt) > 3 * 24 * 60 * 60
-      // 旧版缓存保存相对路径，按需刷新为完整 URL，无需修改表结构。
-      const legacyHeader = cached?.header && !isHeaderUrl(cached.header)
-      if (!expired && !legacyHeader) continue
-      if (!gameInfoRequests.has(appid)) {
-        const pending = (async () => {
-          const details = await api.store.appdetails(appid)
-          if (!details.name) return cached
-          const game = {
-            appid,
-            name: details.name,
-            header: isHeaderUrl(details.header_image) ? details.header_image : ''
-          }
-          if (cached) {
-            await db.game.set(appid, game)
-          } else {
-            await db.game.add([game])
-          }
-          return { ...cached, ...game }
-        })().catch(() => cached).finally(() => gameInfoRequests.delete(appid))
-        gameInfoRequests.set(appid, pending)
+      return !cached || !Number.isFinite(updatedAt) || now - updatedAt > 3 * 24 * 60 * 60
+    })
+    if (!refreshIds.length) return appInfo
+    // 恢复批量请求；只有封面下载失败才在 getHeaderImageByAppid 中查询 appdetails。
+    const infos = await api.IStoreBrowseService.GetItems(refreshIds, { include_assets: true })
+    const newGames = []
+    for (const appid of refreshIds) {
+      const info = infos[appid]
+      if (!info) continue
+      const cached = appInfo[appid]
+      const game = {
+        appid,
+        name: info.name,
+        community: info.assets?.community_icon,
+        // 已验证的完整地址优先保留；相对路径仍按原逻辑使用。
+        header: isHeaderUrl(cached?.header) ? cached.header : info.assets?.header
       }
-      const game = await gameInfoRequests.get(appid)
-      if (game) appInfo[appid] = game
+      if (cached) await db.game.set(appid, game)
+      else newGames.push(game)
+      appInfo[appid] = { ...cached, ...game }
     }
+    if (newGames.length) await db.game.add(newGames)
     return appInfo
   } catch (error) {
     return appInfo

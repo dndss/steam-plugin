@@ -26,84 +26,134 @@ const header = 'https://shared.akamai.steamstatic.com/store_item_assets/steam/ap
 const lodash = { uniq: xs => [...new Set(xs)] }
 const moment = value => ({ unix: () => Math.floor((value === undefined ? now : Date.parse(value)) / 1000) })
 
-async function fixture (initial = {}, fetch = async () => ({ name: 'FlowTrak Demo', header_image: header })) {
-  const rows = structuredClone(initial), calls = [], writes = []
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64')
+const image = 'data:image/png;base64,' + png.toString('base64')
+
+async function fixture (initial = {}, overrides = {}) {
+  const rows = structuredClone(initial), calls = [], batches = [], downloads = [], writes = []
   const db = { game: {
     get: async ids => Object.fromEntries(ids.filter(id => rows[id]).map(id => [id, { ...rows[id] }])),
     add: async games => { for (const game of games) { writes.push(game); rows[game.appid] = { ...game, updatedAt: fresh } } },
     set: async (id, game) => { writes.push(game); rows[id] = { ...rows[id], ...game, updatedAt: fresh } }
   } }
-  const api = { store: { appdetails: async id => { calls.push(id); return fetch(id) } } }
+  const api = {
+    store: { appdetails: async id => { calls.push(id); return overrides.details ? overrides.details(id) : { name: 'FlowTrak Demo', header_image: header } } },
+    IStoreBrowseService: { GetItems: async ids => {
+      batches.push(ids)
+      if (overrides.batch) return overrides.batch(ids)
+      return Object.fromEntries(ids.map(id => [id, { name: 'Game ' + id, assets: { header: 'header.jpg', community_icon: 'icon' } }]))
+    } }
+  }
   const steam = await load('models/utils/steam.js', {
     lodash: { default: lodash }, moment: { default: moment },
-    '#models': { api, db }, '#components': { Config: {} }, crypto: { randomBytes: () => {} }
+    '#models': { api, db }, '#components': { Config: { steam: { timeout: 5 } } }, crypto: { randomBytes: () => {} },
+    axios: { default: { get: async url => { downloads.push(url); return { data: overrides.download ? await overrides.download(url) : png } } } },
+    'http-proxy-agent': { HttpProxyAgent: class {} }, 'https-proxy-agent': { HttpsProxyAgent: class {} }
   })
-  return { steam, rows, calls, writes }
+  return { steam, rows, calls, batches, downloads, writes }
 }
 
-test('stores and reuses the complete API URL including hash and query', async () => {
-  const { steam, rows, calls } = await fixture()
-  assert.equal(await steam.getHeaderImgUrlByAppid(4733380), header)
-  assert.equal(rows['4733380'].name, 'FlowTrak Demo')
-  assert.equal(rows['4733380'].header, header)
-  assert.equal(await steam.getHeaderImgUrlByAppid('4733380'), header)
-  assert.deepEqual(calls, ['4733380'])
+test('20 cold-cache covers use one bulk metadata request and zero appdetails requests', async () => {
+  const { steam, batches, calls, downloads } = await fixture()
+  const ids = Array.from({ length: 20 }, (_, i) => String(i + 1))
+  const info = await steam.getGameSchineseInfo(ids)
+  const images = await Promise.all(ids.map(id => steam.getHeaderImageByAppid(id, info[id])))
+  assert.ok(images.every(result => result === image))
+  assert.deepEqual(batches, [ids])
+  assert.equal(calls.length, 0)
+  assert.equal(downloads.length, 20)
 })
 
-test('refreshes only expired or legacy relative-path records and preserves other fields', async () => {
-  const { steam, rows, calls } = await fixture({
-    1: { appid: '1', name: 'Fresh', header, updatedAt: fresh },
-    2: { appid: '2', name: 'Old', header, updatedAt: old },
-    3: { appid: '3', name: 'Legacy', header: 'hash/header.jpg', community: 'icon', updatedAt: fresh }
+test('only a failed cover requests appdetails, validates it, and caches the complete URL', async () => {
+  const { steam, rows, calls, batches, downloads } = await fixture({}, {
+    download: async url => { if (url.endsWith('/4733380/header.jpg')) throw Error('404'); return png }
   })
-  await steam.getGameSchineseInfo(['1', '2', '3', 3])
-  assert.deepEqual(calls, ['2', '3'])
-  assert.equal(rows['3'].header, header)
-  assert.equal(rows['3'].community, 'icon')
+  const info = await steam.getGameSchineseInfo(['570', '4733380'])
+  await Promise.all(['570', '4733380'].map(id => steam.getHeaderImageByAppid(id, info[id])))
+  assert.deepEqual(calls, ['4733380'])
+  assert.equal(rows['4733380'].header, header)
+  assert.equal(rows['4733380'].name, 'FlowTrak Demo')
+  downloads.length = 0
+  assert.equal(await steam.getHeaderImageByAppid('4733380'), image)
+  assert.deepEqual(downloads, [header])
+  assert.equal(batches.length, 1)
+  assert.equal(calls.length, 1)
+  assert.deepEqual(steam.headerImageFile(image), png)
 })
 
-test('failed refresh preserves stale data and does not extend its expiry', async () => {
-  const { steam, rows, writes } = await fixture({
-    1: { appid: '1', name: 'Old', header, updatedAt: old },
-    2: { appid: '2', name: 'Legacy', header: 'header.jpg', updatedAt: old }
-  }, async () => { throw Error('timeout') })
-  assert.equal(await steam.getHeaderImgUrlByAppid('1'), header)
-  assert.equal(await steam.getHeaderImgUrlByAppid('2'), '')
-  assert.equal(await steam.getHeaderImgUrlByAppid('3'), '')
+test('fresh relative paths are valid cache entries; only expired metadata is batch-refreshed', async () => {
+  const { steam, rows, batches, calls } = await fixture({
+    1: { appid: '1', name: 'Fresh', header: 'hash/header.jpg', updatedAt: fresh },
+    2: { appid: '2', name: 'Old', header, updatedAt: old },
+    3: { appid: '3', name: 'Old', header: 'header.jpg', updatedAt: old }
+  })
+  await steam.getGameSchineseInfo(['1', '2', '3'])
+  assert.deepEqual(batches, [['2', '3']])
+  assert.equal(rows['2'].header, header)
+  assert.equal(rows['3'].community, 'icon')
+  assert.equal(await steam.getHeaderImgUrlByAppid('1'), 'https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1/hash/header.jpg')
+  assert.equal(calls.length, 0)
+})
+
+test('failed metadata refresh retains cached URLs and allows CDN download', async () => {
+  const { steam, rows, calls, writes } = await fixture({
+    1: { appid: '1', name: 'Old', header, updatedAt: old }
+  }, { batch: async () => { throw Error('timeout') } })
+  assert.equal(await steam.getHeaderImageByAppid('1'), image)
   assert.equal(rows['1'].updatedAt, old)
+  assert.equal(calls.length, 0)
   assert.equal(writes.length, 0)
 })
 
-test('missing or invalid image is omitted while the name remains cached', async () => {
-  for (const image of [undefined, '', 'header.jpg', 'javascript:alert(1)']) {
-    const { steam, rows, calls } = await fixture({}, async () => ({ name: 'Demo', header_image: image }))
-    assert.equal(await steam.getHeaderImgUrlByAppid('1'), '')
-    assert.equal(rows['1'].name, 'Demo')
-    await steam.getHeaderImgUrlByAppid('1')
+test('HTML bodies and missing games get short negative caching, not successful URL caching', async () => {
+  for (const details of [async () => ({}), async () => { throw Error('429') }, async () => ({ name: 'Demo', header_image: header })]) {
+    const { steam, calls, downloads, rows } = await fixture({}, {
+      download: async () => Buffer.from('<html>404 Not Found</html>'), details
+    })
+    assert.equal(await steam.getHeaderImageByAppid('4733380'), '')
+    const attempts = downloads.length
+    assert.equal(await steam.getHeaderImageByAppid('4733380'), '')
     assert.equal(calls.length, 1)
+    assert.equal(downloads.length, attempts)
+    assert.equal(rows['4733380'].header, 'header.jpg')
   }
 })
 
-test('an unavailable app is not persisted and does not block other games', async () => {
-  const { steam, rows } = await fixture({}, async id => id === '1' ? {} : ({ name: 'Demo', header_image: header }))
-  const info = await steam.getGameSchineseInfo(['1', '2'])
-  assert.equal(rows['1'], undefined)
-  assert.equal(info['2'].header, header)
-})
-
-test('overlapping requests share a refresh and invalid/non-Steam IDs are ignored', async () => {
+test('concurrent requests for the same App share download and fallback', async () => {
   let release
   const gate = new Promise(resolve => { release = resolve })
-  const { steam, calls, writes } = await fixture({}, async () => { await gate; return { name: 'Demo', header_image: header } })
-  const first = steam.getHeaderImgUrlByAppid('4733380')
-  const second = steam.getHeaderImgUrlByAppid(4733380)
+  const { steam, calls, downloads } = await fixture({}, { download: async url => {
+    await gate
+    if (url !== header) throw Error('404')
+    return png
+  } })
+  const pending = [steam.getHeaderImageByAppid('4733380'), steam.getHeaderImageByAppid(4733380)]
   await new Promise(resolve => setImmediate(resolve))
-  assert.equal(calls.length, 1)
+  assert.equal(downloads.length, 1)
   release()
-  assert.deepEqual(await Promise.all([first, second]), [header, header])
-  assert.equal(writes.length, 1)
-  for (const id of [undefined, '', '17579876560805036032', 'abc']) assert.equal(await steam.getHeaderImgUrlByAppid(id), '')
+  assert.deepEqual(await Promise.all(pending), [image, image])
   assert.equal(calls.length, 1)
+})
+
+test('different cover downloads run concurrently with a bounded maximum', async () => {
+  let active = 0, peak = 0
+  const { steam } = await fixture({}, { download: async () => {
+    active++
+    peak = Math.max(peak, active)
+    await new Promise(resolve => setImmediate(resolve))
+    active--
+    return png
+  } })
+  const ids = ['1', '2', '3', '4', '5', '6']
+  const info = await steam.getGameSchineseInfo(ids)
+  await Promise.all(ids.map(id => steam.getHeaderImageByAppid(id, info[id])))
+  assert.equal(peak, 3)
+})
+
+test('invalid App IDs do not make network requests', async () => {
+  const { steam, calls, batches, downloads } = await fixture()
+  for (const id of [undefined, '', 'abc', '17579876560805036032']) assert.equal(await steam.getHeaderImageByAppid(id), '')
+  assert.equal(calls.length + batches.length + downloads.length, 0)
 })
 
 test('appdetails checks success and retains existing store request parameters', async () => {
@@ -128,20 +178,20 @@ test('render resolves only visible missing covers and passes URLs to status/revi
     'art-template': { default: {} },
     '#models': { canvas: {}, info: {}, utils: { steam: {
       getGameSchineseInfo: async ids => { lookups.push(ids); return { 1: { name: 'Demo', header }, 2: { header: 'header.jpg' } } },
-      getHeaderImgUrlByAppid: async id => id ? header : ''
+      getHeaderImageByAppid: async id => id && id !== '2' ? image : ''
     } } },
     '#components': { Version: { pluginPath: '/steam', pluginName: 'steam-plugin' }, Config: { other: { hiddenLength: 4, itemLength: 2 }, tips: {} } }
   })).default
   const games = [{ appid: '1' }, { appid: '2' }, { appid: '3', image: 'https://existing.test/image.jpg' }, { appid: '4', noImg: true }, { appid: '5' }]
   await Render.render('inventory/index', { data: [{ games }] })
   assert.deepEqual(lookups, [['1', '2']])
-  assert.equal(screenshots[0].data[0].games[0].image, header)
+  assert.equal(screenshots[0].data[0].games[0].image, image)
   assert.equal(screenshots[0].data[0].games[1].image, '')
   assert.equal(screenshots[0].data[0].games[2].image, 'https://existing.test/image.jpg')
   await Render.render('info/index', { gameId: '4733380' })
-  assert.equal(screenshots[1].gameHeader, header)
+  assert.equal(screenshots[1].gameHeader, image)
   await Render.render('review/index', { appid: '4733380' })
-  assert.equal(screenshots[2].header, header)
+  assert.equal(screenshots[2].header, image)
 })
 
 
@@ -156,7 +206,7 @@ test('text status keeps the game name and never emits an empty image segment', a
   const { app } = await load('apps/info.js', {
     moment: { default: clock },
     '#lib': { segment: { image: file => { assert.ok(file); return { type: 'image', file } } } },
-    '#models': { api: { ISteamUser: { GetPlayerSummaries: async () => [{ communityvisibilitystate: 3, steamid: '1', gameid: '4733380', gameextrainfo: 'FlowTrak Demo' }] } }, utils: { steam: { getHeaderImgUrlByAppid: async () => cover, getFriendCode: () => '1', getPersonaState: () => '在线' } } },
+    '#models': { api: { ISteamUser: { GetPlayerSummaries: async () => [{ communityvisibilitystate: 3, steamid: '1', gameid: '4733380', gameextrainfo: 'FlowTrak Demo' }] } }, utils: { steam: { getHeaderImageByAppid: async () => cover, headerImageFile: source => source, getFriendCode: () => '1', getPersonaState: () => '在线' } } },
     '#components': { App, Config: { other: { infoMode: 1, steamAvatar: false } }, Render: {} }
   })
   const withoutImage = await app.info.fnc({}, { steamId: '1' })
@@ -186,4 +236,16 @@ test('SQLite refresh advances updatedAt even when name and header are unchanged'
   } finally {
     await sequelize.close()
   }
+})
+
+
+test('downloaded image data can be decoded by Canvas and converted for message adapters', async () => {
+  const { createCanvas, loadImage } = await import('@napi-rs/canvas')
+  const source = createCanvas(2, 2).toBuffer('image/png')
+  const { steam } = await fixture({}, { download: async () => source })
+  const data = await steam.getHeaderImageByAppid('570')
+  const decoded = await loadImage(data)
+  assert.equal(decoded.width, 2)
+  assert.equal(decoded.height, 2)
+  assert.deepEqual(steam.headerImageFile(data), source)
 })

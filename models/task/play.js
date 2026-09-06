@@ -57,7 +57,7 @@ export async function callback () {
         // 找到所有的推送群
         const pushGroups = PushData.filter(i => i.steamId === player.steamid)
         const appid = player.gameid || lastPlay.appid
-        const iconUrl = await utils.steam.getHeaderImgUrlByAppid(appid)
+        const iconUrl = await utils.steam.getHeaderImageByAppid(appid)
         for (const i of pushGroups) {
           const avatar = await utils.bot.getUserAvatar(i.botId, i.userId, i.groupId)
           // 0 就是没有人绑定
@@ -98,7 +98,7 @@ export async function callback () {
                 appid: lastPlay.appid,
                 detail: `${nickname}(${player.personaname})`,
                 desc: `时长: ${utils.formatDuration(time)}`,
-                image: await utils.steam.getHeaderImgUrlByAppid(lastPlay.appid),
+                image: await utils.steam.getHeaderImageByAppid(lastPlay.appid),
                 avatar,
                 type: 'end'
               })
@@ -160,7 +160,7 @@ export async function callback () {
               games: i.start
             })
           } else {
-            data.push(...i.start.map(item => [...(item.image ? [segment.image(item.image)] : []), `[Steam] ${item.detail} 正在玩 ${item.name}\n${item.desc}`]))
+            data.push(...i.start.map(item => [...(item.image ? [segment.image(utils.steam.headerImageFile(item.image))] : []), `[Steam] ${item.detail} 正在玩 ${item.name}\n${item.desc}`]))
           }
         }
         if (i.end.length) {
@@ -170,7 +170,7 @@ export async function callback () {
               games: i.end
             })
           } else {
-            data.push(...i.end.map(item => [...(item.image ? [segment.image(item.image)] : []), `[Steam] ${item.detail} 已结束游玩 ${item.name}\n${item.desc}`]))
+            data.push(...i.end.map(item => [...(item.image ? [segment.image(utils.steam.headerImageFile(item.image))] : []), `[Steam] ${item.detail} 已结束游玩 ${item.name}\n${item.desc}`]))
           }
         }
         if (i.state.length) {
@@ -181,7 +181,7 @@ export async function callback () {
             })
           } else {
             data.push(...i.state.map(item => [
-              item.image ? segment.image(item.image) : '',
+              item.image ? segment.image(utils.steam.headerImageFile(item.image)) : '',
               `[Steam] ${item.name} ${item.desc} \n${item.detail}`
             ]))
           }

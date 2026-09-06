@@ -37,13 +37,16 @@ export async function callback () {
         continue
       }
       const games = newGames.filter(i => diff.includes(i.appid))
+      const covers = Config.push.pushMode == 1
+        ? await utils.steam.getGameSchineseInfo(games.map(game => game.appid))
+        : {}
       for (const g of pushList.filter(p => p.steamId === i.steamId)) {
         const username = await utils.bot.getUserName(g.botId, g.userId, g.groupId)
         if (Config.push.pushMode == 1) {
           for (const i of games) {
-            const image = i.image || await utils.steam.getHeaderImgUrlByAppid(i.appid)
+            const image = i.image || await utils.steam.getHeaderImageByAppid(i.appid, covers[i.appid] || null)
             const msg = [
-              ...(image ? [segment.image(image)] : []),
+              ...(image ? [segment.image(utils.steam.headerImageFile(image))] : []),
               `[Steam] ${username}的库存新增: ${i.name}`
             ]
             await utils.bot.sendGroupMsg(g.botId, g.groupId, msg)

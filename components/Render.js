@@ -49,14 +49,14 @@ const Render = {
         const infos = await utils.steam.getGameSchineseInfo(i.games
           .filter(g => params.schinese || (!g.noImg && !g.image))
           .map(g => g.appid))
-        i.games = i.games.map(g => {
+        i.games = await Promise.all(i.games.map(async g => {
           const info = infos[g.appid] || {}
           if (!g.image && !g.noImg) {
-            g.image = /^https?:\/\//.test(info.header || '') ? info.header : ''
+            g.image = await utils.steam.getHeaderImageByAppid(g.appid, infos[g.appid] || null)
           }
           if (params.schinese && info.name) g.name = info.name
           return g
-        })
+        }))
         return i
       }))
       const len = minLength === 1 ? 1.4 : minLength
@@ -73,9 +73,9 @@ const Render = {
         return this.simpleRender(path, params)
       }
     } else if (path === 'review/index') {
-      data.header = await utils.steam.getHeaderImgUrlByAppid(data.appid)
+      data.header = await utils.steam.getHeaderImageByAppid(data.appid)
     } else if (path === 'info/index') {
-      data.gameHeader = await utils.steam.getHeaderImgUrlByAppid(data.gameId)
+      data.gameHeader = await utils.steam.getHeaderImageByAppid(data.gameId)
       if (data.toGif) {
         data.tempPath = join(Version.pluginPath, 'temp', String(data.tempName || Date.now())).replace(/\\/g, '/')
         try {

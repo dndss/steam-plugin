@@ -53,13 +53,14 @@ export async function callback () {
       const steamIds = _.uniq(addItems.map(i => i.owner_steamids[i.owner_steamids.length - 1]))
       const infoMap = await api.IPlayerService.GetPlayerLinkDetails(steamIds)
         .catch(() => steamIds.map(i => ({ public_data: { persona_name: i, steamid: i } })))
+      const covers = await utils.steam.getGameSchineseInfo(addItems.map(app => app.appid))
       const games = []
       for (const app of addItems) {
         const steamId = app.owner_steamids.pop()
         const info = infoMap.find(i => i.public_data.steamid === steamId)
         games.push({
           name: app.name,
-          image: await utils.steam.getHeaderImgUrlByAppid(app.appid),
+          image: await utils.steam.getHeaderImageByAppid(app.appid, covers[app.appid] || null),
           appid: app.appid,
           detail: moment.unix(app.rt_time_acquired).format('YYYY-MM-DD HH:mm:ss'),
           desc: `来自: ${info?.public_data?.persona_name || steamId}`
@@ -70,7 +71,7 @@ export async function callback () {
         if (Config.push.pushMode == 1) {
           for (const i of games) {
             const msg = [
-              ...(i.image ? [segment.image(i.image)] : []),
+              ...(i.image ? [segment.image(utils.steam.headerImageFile(i.image))] : []),
               `[Steam] ${username}的家庭库存新增:\n${i.name}\n时间: ${i.appid}\n${i.desc}`
             ]
             await utils.bot.sendGroupMsg(g.botId, g.groupId, msg)
