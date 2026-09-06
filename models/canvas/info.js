@@ -1,6 +1,5 @@
 import fs from 'fs'
 import axios from 'axios'
-import { utils } from '#models'
 import { segment } from '#lib'
 import { Version } from '#components'
 import { basename, join } from 'path'
@@ -32,7 +31,7 @@ export async function render (data) {
 
   const name = shortenText(ctx, data.name, 300)
   const status = shortenText(ctx, data.status, 300)
-  const gameAvatar = data.gameId ? await loadImage(utils.steam.getHeaderImgUrlByAppid(data.gameId)) : null
+  const gameAvatar = data.gameHeader ? await loadImage(data.gameHeader).catch(() => null) : null
   const gameName = shortenText(ctx, data.gameName, 300)
   const friendCode = shortenText(ctx, `好友代码: ${data.friendCode}`, 580)
   const createTime = shortenText(ctx, `注册时间: ${data.createTime}`, 580)
@@ -79,8 +78,8 @@ export async function render (data) {
     let y = 250
 
     // 正在玩
-    if (gameAvatar) {
-      ctx.drawImage(gameAvatar, 40, 220, 164, 77)
+    if (data.gameId) {
+      if (gameAvatar) ctx.drawImage(gameAvatar, 40, 220, 164, 77)
       ctx.fillText('游戏中', 220, y)
       ctx.strokeText('游戏中', 220, y)
       y += 30

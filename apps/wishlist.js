@@ -47,7 +47,6 @@ const rule = {
         return {
           ...i,
           name: info.name || i.appid,
-          image: utils.steam.getHeaderImgUrlByAppid(i.appid, 'apps', info.assets?.header),
           desc: moment.unix(i.date_added).format('YYYY-MM-DD HH:mm:ss'),
           price: info.is_free
             ? {

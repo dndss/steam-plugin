@@ -35,18 +35,28 @@ export function getFriendCode (steamId) {
 }
 
 /**
- * 获取appid对应的header图片url
- * @param {string} appid
- * @param {string?} type
- * @param {boolean?} isSchinese
- * @returns {string}
+ * 从游戏资料缓存获取完整封面 URL；不可用时返回空字符串。
+ * @param {string|number} appid
+ * @returns {Promise<string>}
  */
-export function getHeaderImgUrlByAppid (appid, type = 'apps', name = 'header.jpg') {
+export async function getHeaderImgUrlByAppid (appid) {
   if (!appid) return ''
-  return `https://shared.akamai.steamstatic.com/store_item_assets/steam/${type}/${appid}/${name}`
-  // return `https://steamcdn-a.akamaihd.net/steam/${type}/${appid}/${name}`
-  // return `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/${type}/${appid}/${name}`
+  const info = await getGameSchineseInfo([appid])
+  const header = info[String(appid)]?.header
+  return isHeaderUrl(header) ? header : ''
 }
+
+function isHeaderUrl (header) {
+  if (typeof header !== 'string') return false
+  try {
+    return ['http:', 'https:'].includes(new URL(header).protocol)
+  } catch {
+    return false
+  }
+}
+
+// 合并同一 App 的并行刷新；持久缓存仍使用 game 表和 3 天有效期。
+const gameInfoRequests = new Map()
 
 /**
  * 获取静态资源url
@@ -315,7 +325,7 @@ export async function getUserSummaries (steamIds) {
         gameid: (gameid && String(gameid).length <= 10) ? gameid : undefined,
         gameextrainfo,
         lastlogoff: i.private_data.last_logoff_time,
-        header: info.assets?.header || info.header
+        header: info.header
         // TODO: 展示在好友列表的小图标
         // community_icon: appInfo[gameid]?.assets?.community_icon
       }
@@ -340,62 +350,48 @@ export function getStateColor (state) {
 }
 
 /**
- * 从数据库中获取游戏中文名
+ * 获取游戏名称和完整封面 URL，SQLite 缓存 3 天
  * @param {string[]} appids
  * @returns {Promise<{[appid: string]: import('models/db/game').GameColumns}>}
  */
 export async function getGameSchineseInfo (appids) {
-  appids = _.uniq(appids.filter(Boolean).map(String))
-  if (!appids.length) {
-    return {}
-  }
+  appids = _.uniq(appids.filter(Boolean).map(String).filter(id => /^\d{1,10}$/.test(id)))
+  if (!appids.length) return {}
+  let appInfo = {}
   try {
-    // 先从数据库中找出对应的游戏名
-    const appInfo = await db.game.get(appids)
-    const cacheAppids = Object.keys(appInfo)
-    // 找到没有被缓存的appid
-    const noCacheAppids = _.difference(appids, cacheAppids)
-    // 找到缓存超过3天的appid
+    appInfo = await db.game.get(appids)
     const now = moment().unix()
-    const cacheExpiredAppids = cacheAppids.filter(i => {
-      const lastUpdatedTime = moment(appInfo[i].updatedAt).unix()
-      return (now - lastUpdatedTime) > 3 * 24 * 60 * 60
-    })
-    const hasCacheAppids = [...noCacheAppids, ...cacheExpiredAppids]
-    if (hasCacheAppids.length) {
-      // 获取游戏名
-      const info = await api.IStoreBrowseService.GetItems(hasCacheAppids, { include_assets: true })
-      const cache = hasCacheAppids.map(i => info[i]
-        ? ({
-            appid: String(i),
-            name: info[i].name,
-            community: info[i].assets?.community_icon,
-            header: info[i].assets?.header
-          })
-        : null).filter(Boolean)
-      const newCache = []
-      const expiredCache = []
-      cache.forEach(i => {
-        if (noCacheAppids.includes(i.appid)) {
-          newCache.push(i)
-        } else if (cacheExpiredAppids.includes(i.appid)) {
-          expiredCache.push(i)
-        }
-      })
-      // 缓存游戏名
-      if (newCache.length) {
-        await db.game.add(newCache)
+    for (const appid of appids) {
+      const cached = appInfo[appid]
+      const updatedAt = cached && moment(cached.updatedAt).unix()
+      const expired = !cached || !Number.isFinite(updatedAt) || (now - updatedAt) > 3 * 24 * 60 * 60
+      // 旧版缓存保存相对路径，按需刷新为完整 URL，无需修改表结构。
+      const legacyHeader = cached?.header && !isHeaderUrl(cached.header)
+      if (!expired && !legacyHeader) continue
+      if (!gameInfoRequests.has(appid)) {
+        const pending = (async () => {
+          const details = await api.store.appdetails(appid)
+          if (!details.name) return cached
+          const game = {
+            appid,
+            name: details.name,
+            header: isHeaderUrl(details.header_image) ? details.header_image : ''
+          }
+          if (cached) {
+            await db.game.set(appid, game)
+          } else {
+            await db.game.add([game])
+          }
+          return { ...cached, ...game }
+        })().catch(() => cached).finally(() => gameInfoRequests.delete(appid))
+        gameInfoRequests.set(appid, pending)
       }
-      if (expiredCache.length) {
-        for (const i of expiredCache) {
-          await db.game.set(i.appid, i)
-        }
-      }
-      Object.assign(appInfo, _.keyBy(cache, 'appid'))
+      const game = await gameInfoRequests.get(appid)
+      if (game) appInfo[appid] = game
     }
     return appInfo
   } catch (error) {
-    return {}
+    return appInfo
   }
 }
 

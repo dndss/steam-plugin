@@ -29,7 +29,6 @@ const rule = {
             appid: i.appid,
             detail: change ? `变更: ${change > 0 ? `+${change}` : change}` : '',
             desc: `峰值: ${i.peak_in_game}`,
-            image: utils.steam.getHeaderImgUrlByAppid(i.appid),
             price: utils.steam.generatePrice(price, i.item.is_free)
           })
         }
@@ -43,7 +42,6 @@ const rule = {
             appid: i.appid,
             detail: `当前玩家: ${i.concurrent_in_game}`,
             desc: `峰值: ${i.peak_in_game}`,
-            image: utils.steam.getHeaderImgUrlByAppid(i.appid),
             price: utils.steam.generatePrice(price, i.item.is_free)
           })
         }
@@ -89,7 +87,6 @@ const rule = {
               appid,
               detail: info.reviews?.summary_filtered.review_score_label,
               desc: info.release ? `${moment.unix(info.release.steam_release_date).format('YYYY年MM月DD日')}` : '',
-              image: utils.steam.getHeaderImgUrlByAppid(appid, 'apps', info.assets?.header),
               price: utils.steam.generatePrice(price, info.is_free)
             }
           })
@@ -123,7 +120,6 @@ const rule = {
             appid: i.appid,
             detail: change ? `变更: ${change > 0 ? `+${change}` : change}` : '',
             desc: `持续周数: ${i.consecutive_weeks}`,
-            image: utils.steam.getHeaderImgUrlByAppid(i.appid),
             price: utils.steam.generatePrice(price, i.item.is_free)
           })
         }
@@ -139,7 +135,6 @@ const rule = {
             appid: i.appid,
             detail: change ? `变更: ${change > 0 ? `+${change}` : change}` : '',
             desc: `持续周数: ${lastWeekInfo ? lastWeekInfo.consecutive_weeks : 1}`,
-            image: utils.steam.getHeaderImgUrlByAppid(i.appid),
             price: utils.steam.generatePrice(price, i.is_free)
           })
         }
@@ -247,7 +242,6 @@ const rule = {
                 return {
                   name: info.name,
                   appid,
-                  image: utils.steam.getHeaderImgUrlByAppid(appid, 'apps', info.assets?.header),
                   price: utils.steam.generatePrice(price, info.is_free)
                 }
               }

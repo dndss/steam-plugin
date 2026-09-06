@@ -87,7 +87,6 @@ const rule = {
         return {
           appid,
           name: info.name,
-          image: utils.steam.getHeaderImgUrlByAppid(appid, 'apps', info.assets.header),
           price: utils.steam.generatePrice(info.best_purchase_option, info.is_free)
         }
       })

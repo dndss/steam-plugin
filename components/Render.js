@@ -46,19 +46,15 @@ const Render = {
           i.desc.push(`太多辣 ! 已隐藏${length}个项目`)
           i.games.length = hiddenLength
         }
-        const infos = params.schinese ? await utils.steam.getGameSchineseInfo(i.games.map(g => g.appid)) : {}
+        const infos = await utils.steam.getGameSchineseInfo(i.games
+          .filter(g => params.schinese || (!g.noImg && !g.image))
+          .map(g => g.appid))
         i.games = i.games.map(g => {
           const info = infos[g.appid] || {}
           if (!g.image && !g.noImg) {
-            g.image = utils.steam.getHeaderImgUrlByAppid(g.appid)
+            g.image = /^https?:\/\//.test(info.header || '') ? info.header : ''
           }
-          if (info.name) {
-            g.name = info.name
-            if (g.image) {
-              g.image = utils.steam.getHeaderImgUrlByAppid(info.appid, 'apps', info.header)
-              // g.image = utils.steam.getHeaderImgUrlByAppid(info.appid, 'apps')
-            }
-          }
+          if (params.schinese && info.name) g.name = info.name
           return g
         })
         return i
@@ -76,7 +72,10 @@ const Render = {
       } else {
         return this.simpleRender(path, params)
       }
+    } else if (path === 'review/index') {
+      data.header = await utils.steam.getHeaderImgUrlByAppid(data.appid)
     } else if (path === 'info/index') {
+      data.gameHeader = await utils.steam.getHeaderImgUrlByAppid(data.gameId)
       if (data.toGif) {
         data.tempPath = join(Version.pluginPath, 'temp', String(data.tempName || Date.now())).replace(/\\/g, '/')
         try {

@@ -110,7 +110,7 @@ export async function appdetails (appid) {
     params: {
       appids: appid
     }
-  }).then(res => res?.[appid]?.data || {})
+  }).then(res => res?.[appid]?.success === true ? (res[appid].data || {}) : {})
 }
 
 /**

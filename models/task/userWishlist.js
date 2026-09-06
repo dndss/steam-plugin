@@ -51,8 +51,9 @@ export async function callback () {
         const username = await utils.bot.getUserName(g.botId, g.userId, g.groupId)
         if (Config.push.pushMode == 1) {
           for (const i of games) {
+            const image = i.image || await utils.steam.getHeaderImgUrlByAppid(i.appid)
             const msg = [
-              segment.image(i.image),
+              ...(image ? [segment.image(image)] : []),
               `[Steam] ${username}的愿望单新增: ${i.name}`
             ]
             await utils.bot.sendGroupMsg(g.botId, g.groupId, msg)

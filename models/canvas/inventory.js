@@ -1,5 +1,4 @@
 import _ from 'lodash'
-import { utils } from '#models'
 import { Version } from '#components'
 import { loadImage, drawBackgroundColor, createCanvas, toImage, shortenText } from './canvas.js'
 
@@ -38,7 +37,7 @@ export async function render (data, lineItemCount) {
     if (i.noImg) {
       return {}
     }
-    const Image = await loadImage(i.image || utils.steam.getHeaderImgUrlByAppid(i.appid)).catch(() => null)
+    const Image = i.image ? await loadImage(i.image).catch(() => null) : null
     return {
       ...i,
       Image

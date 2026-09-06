@@ -160,8 +160,9 @@ const rule = {
           info.loccountrycode ? `账号地区: ${getLoccountryCode(info.loccountrycode)}` : ''
         ].filter(Boolean).join('\n'))
         if (info.gameid) {
-          const icon = utils.steam.getHeaderImgUrlByAppid(info.gameid)
-          msg.push('\n', segment.image(icon), `\n正在游玩: ${info.gameextrainfo}`)
+          const icon = await utils.steam.getHeaderImgUrlByAppid(info.gameid)
+          if (icon) msg.push('\n', segment.image(icon))
+          msg.push(`\n正在游玩: ${info.gameextrainfo}`)
         }
         return msg
       }

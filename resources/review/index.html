@@ -7,8 +7,7 @@
 {{block 'main'}}
 
 <div class="game_review_summary positive">
-	<img src="https://steamcdn-a.akamaihd.net/steam/apps/{{appid}}/header.jpg" style="width: 300px;"
-		alt="{{name}}没有找到图片">
+	{{if header}}<img src="{{header}}" style="width: 300px;">{{/if}}
 	<div>
 		{{state}} {{honor ? `(${honor})` : ''}}
 	</div>

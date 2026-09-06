@@ -146,7 +146,6 @@ const rule = {
         games.push({
           appid,
           name: info.name,
-          image: utils.steam.getHeaderImgUrlByAppid(appid, 'apps', info.assets?.header),
           price,
           desc: price.discount ? `结束时间: ${moment.unix(info.best_purchase_option.active_discounts.shift().discount_end_date).format('YYYY-MM-DD')}` : undefined
         })
@@ -279,7 +278,7 @@ const rule = {
             name: i.gameextrainfo,
             detail: nickname,
             desc: i.personaname,
-            image: utils.steam.getHeaderImgUrlByAppid(i.gameid)
+            image: await utils.steam.getHeaderImgUrlByAppid(i.gameid)
           })
         } else {
           notPlaying.push({

@@ -18,8 +18,8 @@ const rule = {
       if (players === false) {
         return '查询失败，可能没有这个游戏?'
       }
-      const icon = utils.steam.getHeaderImgUrlByAppid(appid)
-      const iconBuffer = await utils.getImgUrlBuffer(icon)
+      const icon = await utils.steam.getHeaderImgUrlByAppid(appid)
+      const iconBuffer = icon ? await utils.getImgUrlBuffer(icon) : null
       const msg = []
       if (iconBuffer) {
         msg.push(segment.image(iconBuffer))

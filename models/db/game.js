@@ -6,7 +6,7 @@ import { sequelize, DataTypes, Op } from './base.js'
  * @property {string} appid appid
  * @property {string} name 游戏名称
  * @property {string} community 社区icon
- * @property {string} header header图片
+ * @property {string} header 完整封面 URL（旧缓存可能为相对路径）
  */
 
 export const table = sequelize.define('game', {
@@ -80,12 +80,11 @@ export async function get (appids) {
  */
 export async function set (appid, info = {}) {
   appid = String(appid)
-  const item = await table.findOne({
+  // 使用 UPDATE 确保资料未变化时也会更新 updatedAt，重新开始缓存有效期。
+  const [count] = await table.update(info, {
     where: {
       appid
     }
   })
-  if (!item) return false
-  await item.update(info)
-  return true
+  return count > 0
 }

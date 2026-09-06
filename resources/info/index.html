@@ -37,7 +37,7 @@
     {{if gameId}}
     <div id="playing-box">
         <div>
-            <img src="https://steamcdn-a.akamaihd.net/steam/apps/{{gameId}}/header.jpg" width="164">
+            {{if gameHeader}}<img src="{{gameHeader}}" width="164">{{/if}}
         </div>
         <div id="playing-info">
             <div>游戏中</div>

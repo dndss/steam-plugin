@@ -96,6 +96,7 @@ const rule = {
               name: '未知项目',
               appid: i.packageid || i.bundleid,
               image: '',
+              noImg: true,
               price: {
                 original: i.price_when_added?.formatted_amount
               }
@@ -104,11 +105,12 @@ const rule = {
           const image = info.assets
           // eslint-disable-next-line no-template-curly-in-string
             ? utils.steam.getStaticUrl(info.assets.asset_url_format.replace('${FILENAME}', info.assets.header))
-            : utils.steam.getHeaderImgUrlByAppid(info.appid)
+            : ''
           return {
             name: info.name,
             appid: info.appid || info.id,
             image,
+            noImg: !info.appid && !image,
             desc: i.packageid ? '游戏或DLC' : '捆绑包',
             price: {
               original: i.price_when_added.formatted_amount

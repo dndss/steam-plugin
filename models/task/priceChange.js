@@ -62,7 +62,6 @@ export async function callback () {
         name: info.name,
         price,
         desc: `结束时间: ${moment.unix(unix).format('YYYY-MM-DD')}`,
-        image: utils.steam.getHeaderImgUrlByAppid(appid, 'apps', info.assets?.header)
       })
       if (updateLastTimeAppids.indexOf(appid) == -1) {
         updateLastTimeAppids.push(appid)
