@@ -1,6 +1,5 @@
 import fs from 'fs'
 import axios from 'axios'
-import { utils } from '#models'
 import { segment } from '#lib'
 import { Version } from '#components'
 import { basename, join } from 'path'
@@ -18,6 +17,7 @@ import { loadImage, createCanvas, shortenText, toImage } from './canvas.js'
  *   status: string,
  *   color: string,
  *   gameId?: string,
+ *   gameHeader?: string,
  *   gameName?: string,
  *   friendCode: string,
  *   createTime?: string,
@@ -32,7 +32,7 @@ export async function render (data) {
 
   const name = shortenText(ctx, data.name, 300)
   const status = shortenText(ctx, data.status, 300)
-  const gameAvatar = data.gameId ? await loadImage(utils.steam.getHeaderImgUrlByAppid(data.gameId)) : null
+  const gameAvatar = data.gameHeader ? await loadImage(data.gameHeader) : null
   const gameName = shortenText(ctx, data.gameName, 300)
   const friendCode = shortenText(ctx, `好友代码: ${data.friendCode}`, 580)
   const createTime = shortenText(ctx, `注册时间: ${data.createTime}`, 580)

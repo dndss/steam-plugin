@@ -122,6 +122,14 @@ const rule = {
       if (info.communityvisibilitystate !== 3) {
         return `${info.personaname}个人资料未公开`
       }
+      let gameHeader = ''
+      if (info.gameid) {
+        const games = await utils.steam.getGameSchineseInfo([info.gameid])
+        const header = games[info.gameid]?.header
+        gameHeader = /^https?:\/\//i.test(header || '')
+          ? header
+          : utils.steam.getHeaderImgUrlByAppid(info.gameid, 'apps', header || undefined)
+      }
       if (mode == 2) {
         const color = info.gameid ? '#90ba3c' : info.personastate === 0 ? '#898989' : '#57cbde'
         const bg = await api.IPlayerService.GetProfileItemsEquipped(steamId)
@@ -133,6 +141,7 @@ const rule = {
           name: info.personaname,
           status: utils.steam.getPersonaState(info.personastate),
           gameId: info.gameid,
+          gameHeader,
           gameName: info.gameextrainfo,
           friendCode: utils.steam.getFriendCode(info.steamid),
           createTime: moment.unix(info.timecreated).format('YYYY-MM-DD HH:mm:ss'),
@@ -160,8 +169,8 @@ const rule = {
           info.loccountrycode ? `账号地区: ${getLoccountryCode(info.loccountrycode)}` : ''
         ].filter(Boolean).join('\n'))
         if (info.gameid) {
-          const icon = utils.steam.getHeaderImgUrlByAppid(info.gameid)
-          msg.push('\n', segment.image(icon), `\n正在游玩: ${info.gameextrainfo}`)
+          if (gameHeader) msg.push('\n', segment.image(gameHeader))
+          msg.push(`\n正在游玩: ${info.gameextrainfo}`)
         }
         return msg
       }
